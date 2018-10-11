@@ -1146,8 +1146,8 @@ BLKEDIT "Macro Editor"
      s = Dataset(sDataset)
      mdata = np.array(s.get_val('m').values())
  
-     # get_val() does not produce the sparameters in right order
-     # need to correct as follows
+     # get_val() uses a dict to store data but dict in py-v3.6 and lower
+     # is not ordered. The sparameter order gets messed up.
      mdata = np.transpose(mdata)
      new_mdata = mdata*0
      new_mdata[:,0] = mdata[:,3]
