@@ -1069,6 +1069,7 @@ BLKEDIT "Macro Editor"
  
  iccap_func('./py_deembedding', "Execute")
  iccap_func('./py_dataset', "Execute")
+ iccap_func('./py_transistor', "Execute")
  
  print "Loaded PY_RFUTILS Version "+ver
 }
@@ -1091,21 +1092,19 @@ BLKEDIT "Macro Editor"
  # Perform de-embedding on measurement data
  ##########################################
  
- def deembed_open_short(sDut, sOpen, sShort):
-     '''
-     Perform open short de-embedding
-     '''
-     s_dut = get_meas_2port(sDut)
-     s_op = get_meas_2port(sOpen)
-     s_sh = get_meas_2port(sShort)
+ def deembed_open_short(trans, sDut, sOpen, sShort):
+     ''' Perform open short de-embedding '''
+     _, s_dut = get_2port_data(sDut, 'm')
+     _, s_op = get_2port_data(sOpen, 'm')
+     _, s_sh = get_2port_data(sShort, 'm')
      
-     print "De-embedding... All datasets loaded"
+     print "Running deembed_open_short...\nall datasets loaded"
      
      # check frequencies and detect number of datasets available
      if np.size(s_op)==np.size(s_sh):
          nDatasets = np.size(s_dut)/np.size(s_op)
          if isinstance(nDatasets, (int, long)):
-             print "Detected "+str(nDatasets)+" sets of data"
+             print "Detected s-parameters for "+str(nDatasets)+" DC points"
          else:
              raise ValueError("Frequency mismatch between device and standards")
      else:
@@ -1118,7 +1117,9 @@ BLKEDIT "Macro Editor"
          s_n = z2s(y2z(s2y(s_d[i])-s2y(s_op)) - y2z(s2y(s_sh)-s2y(s_op)))
          Sdeemb.extend(s_n)
  
-     return np.array(Sdeemb)
+     numpy2trans(trans,"M",np.array(Sdeemb))    
+         
+     return 1
 }
 }
 }
@@ -1139,23 +1140,93 @@ BLKEDIT "Macro Editor"
  Methods for dataset manipulation
  '''
  
- def get_meas_2port(sDataset):
-     '''
-     Extract measurement data from s-parameter dataset and return as numpy array
-     '''
+ def get_2port_data(sDataset, dtype = 'b'):
+     ''' Extract measurement data from s-parameter dataset and return as numpy array'''
+     ''' Inputs: dataset and type of data m, s, or b '''
+     ''' Returns: simdata, measdata as numpy arrays '''
      s = Dataset(sDataset)
-     mdata = np.array(s.get_val('m').values())
+     dtype = dtype.lower()
+     
+     if dtype == 'm':
+         data = np.array(s.get_val('m').values())
+         data = reorder_matrix(data)
+         return None, np.array(data)
+     elif dtype == 's':
+         data = np.array(s.get_val('s').values())
+         data = reorder_matrix(data)
+         return np.array(data), None
+     elif dtype == 'b':
+         mdata = np.array(s.get_val('m').values())
+         mdata = reorder_matrix(mdata)
+         sdata = np.array(s.get_val('s').values())
+         sdata = reorder_matrix(sdata)
+         return np.array(sdata), np.array(mdata)
+     else:
+         raise ValueError('Invalid dataset type')
+         
+ def reorder_matrix(data):
+     ''' get_val() uses a dict to store data but dict in py-v3.5 and lower is not ordered. '''
+     ''' The sparameter order gets messed up.'''
+     
+     if not data.any():
+         return data
+     else:
+         data = np.transpose(data)
+         new_data = data*0
+         new_data[:,0] = data[:,3]
+         new_data[:,1] = data[:,2]
+         new_data[:,2] = data[:,0]
+         new_data[:,3] = data[:,1]
+         return new_data
+}
+}
+}
+LINK MACRO "py_transistor" "730.400"
+{
+TABLE "Edit Macro Info" "730.400"
+{
+element 0 "MacroType" "PythonGlobal"
+}
+data
+{
+BLKEDIT "Macro Editor"
+{
+ from iccap import *
+ import numpy as np
  
-     # get_val() uses a dict to store data but dict in py-v3.6 and lower
-     # is not ordered. The sparameter order gets messed up.
-     mdata = np.transpose(mdata)
-     new_mdata = mdata*0
-     new_mdata[:,0] = mdata[:,3]
-     new_mdata[:,1] = mdata[:,2]
-     new_mdata[:,2] = mdata[:,0]
-     new_mdata[:,3] = mdata[:,1]
+ ''' Methods for calculation of transistor metrics '''
  
-     return np.array(new_mdata)
+ def calc_h21(trans, Dut):
+     ''' Calculate H21 from s-parameters '''
+     sDut, mDut = get_2port_data(Dut, 'b')
+ 
+     # find larger of arrays likely containing data
+     datalen = np.maximum(np.size(sDut), np.size(mDut))
+     h_sDut = s2h(sDut, z0=50)
+     h_mDut = s2h(mDut, z0=50)
+ 
+     dtype = None
+     if not h_sDut.any():
+         h21_sDut = np.zeros(datalen/4)
+         print "INFO: Only measurement data found"
+         dtype = 'm'
+     else:
+         h21_sDut = np.array(h_sDut[:,2])
+         h21_sDut = np.absolute(h21_sDut)
+ 
+     if not h_mDut.any():
+         h21_mDut = np.zeros(datalen/4)
+         print "INFO: Only simulation data found"
+         dtype = 's'
+     else:
+         h21_mDut = np.array(h_mDut[:,2])
+         h21_mDut = np.absolute(h21_mDut)
+         
+     if dtype is None: dtype = 'b'
+     
+     # massage into a (Nx1) array so that numpy2trans can handle it
+     h21_sim_meas = np.transpose(np.atleast_2d(np.append(h21_mDut, h21_sDut)))
+     return numpy2trans(trans,dtype,h21_sim_meas)
 }
 }
 }
